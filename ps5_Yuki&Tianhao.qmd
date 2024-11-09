@@ -1,0 +1,351 @@
+---
+title: "PS5"
+author: "Yuki Yan & Tianhao Zhang"
+date: "Nov7"
+format: 
+  pdf:
+    include-in-header: 
+       text: |
+         \usepackage{fvextra}
+         \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+include-before-body:
+  text: |
+    \RecustomVerbatimEnvironment{verbatim}{Verbatim}{
+      showspaces = false,
+      showtabs = false,
+      breaksymbolleft={},
+      breaklines
+    }
+output:
+  echo: false
+  eval: false
+---
+
+**Due 11/9 at 5:00PM Central. Worth 100 points + 10 points extra credit.**
+
+## Submission Steps (10 pts)
+1. This problem set is a paired problem set.
+2. Play paper, scissors, rock to determine who goes first. Call that person *Partner 1*.
+    - Partner 1 (name and cnet ID): Yuki Yan yukiyan
+    - Partner 2 (name and cnet ID): Tianhao Zhang
+3. Partner 1 will accept the `ps5` and then share the link it creates with their partner. You can only share it with one partner so you will not be able to change it after your partner has accepted. 
+4. "This submission is our work alone and complies with the 30538 integrity policy." Add your initials to indicate your agreement: \*\*\Y\Y\*\* \*\*\T\Z\*\*
+5. "I have uploaded the names of anyone else other than my partner and I worked with on the problem set **[here](https://docs.google.com/forms/d/185usrCREQaUbvAXpWhChkjghdGgmAZXA3lPWpXLLsts/edit)**"  (1 point)
+6. Late coins used this pset: \*\*\0\_\*\* Late coins left after submission: \*\*\1\_\*\*
+7. Knit your `ps5.qmd` to an PDF file to make `ps5.pdf`, 
+    * The PDF should not be more than 25 pages. Use `head()` and re-size figures when appropriate. 
+8. (Partner 1): push  `ps5.qmd` and `ps5.pdf` to your github repo.
+9. (Partner 1): submit `ps5.pdf` via Gradescope. Add your partner on Gradescope.
+10. (Partner 1): tag your submission in Gradescope
+
+\newpage
+
+```{python}
+import pandas as pd
+import altair as alt
+import time
+
+import warnings 
+warnings.filterwarnings('ignore')
+alt.renderers.enable("png")
+```
+
+
+## Step 1: Develop initial scraper and crawler
+
+### 1. Scraping (PARTNER 1)
+
+```{python}
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+
+def scrape_oig_actions(url):
+    base_url = 'https://oig.hhs.gov/fraud/enforcement/'
+    
+    response = requests.get(url)
+
+    soup = BeautifulSoup(response.text, 'lxml')
+
+    soup.find_all = soup.find_all('li', class_='usa-card card--list pep-card--minimal mobile:grid-col-12')
+
+    data = []
+    for item in soup.find_all:
+        title_tag =  item.find("h2", class_="usa-card__heading").find("a")
+        title = title_tag.get_text(strip=True)
+        link = "https://oig.hhs.gov" + title_tag["href"]
+        date = item.find("span", class_="text-base-dark padding-right-105").get_text(strip=True)
+
+        category = item.find("li", class_="display-inline-block usa-tag text-no-lowercase text-base-darkest bg-base-lightest margin-right-1").get_text(strip=True)
+        data.append({
+            'Title': title,
+            'Date': date,
+            'Category': category,
+            'Link': link
+        })
+
+    return pd.DataFrame(data)
+
+df = scrape_oig_actions(url)
+print(df.head())
+```
+
+
+
+
+### 2. Crawling (PARTNER 1)
+```{python}
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import time
+
+def fetch_agency_details(url):
+   
+    response = requests.get(url)
+    result = {'title': 'No Title Found', 'agency': 'No Agency Found'}  
+
+    if response.status_code != 200:
+        return result 
+    
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    # Fetch the title using <h1> tag
+    title_tag = soup.find('h1', class_='font-heading-xl')
+    if title_tag:
+        result['title'] = title_tag.text.strip()
+
+    # Locate the `ul` and find `li` for agency
+    ul = soup.find('ul', class_='usa-list usa-list--unstyled margin-y-2')
+    if ul:
+        for li in ul.find_all('li'):
+            span = li.find('span', class_='padding-right-2 text-base', string='Agency:')
+            if span:
+                result['agency'] = li.get_text(strip=True).replace('Agency:', '').strip()
+                break
+    
+    return result
+
+def fetch_enforcement_links(page_url, visited_urls):
+    response = requests.get(page_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    links = []
+
+    for a_tag in soup.find_all('a', href=True):
+        if 'href' in a_tag.attrs and '/fraud/enforcement/' in a_tag['href']:
+            full_url = 'https://oig.hhs.gov' + a_tag['href']
+            if full_url not in visited_urls:  
+                links.append(full_url)
+                visited_urls.add(full_url)  
+    
+    return links
+
+def main():
+    base_url = 'https://oig.hhs.gov/fraud/enforcement/'
+    data = []
+    visited_urls = set() 
+
+    for page_num in range(1, 481):  # Loop over 482 pages to run
+        page_url = f"{base_url}?page={page_num}"
+        all_links = fetch_enforcement_links(page_url, visited_urls)
+        
+        for link in all_links:
+            details = fetch_agency_details(link)
+            if details['title'] != 'No Title Found' and details['agency'] != 'No Agency Found':
+              data.append({
+                'Title': details['title'],
+                'Agency': details['agency']
+            })
+        
+        time.sleep(1)  
+
+    if data:
+        df = pd.DataFrame(data)
+        df.to_csv('enforcement_actions_agencies.csv', index=False)
+        print(df.head()) #head
+    else:
+        print("No valid data was collected.")
+
+if __name__ == '__main__':
+    main()
+
+
+```
+
+
+## Step 2: Making the scraper dynamic
+
+### 1. Turning the scraper into a function 
+
+* a. Pseudo-Code (PARTNER 2)
+
+
+* b. Create Dynamic Scraper (PARTNER 2)
+
+```{python}
+import pandas as pd
+from bs4 import BeautifulSoup
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+
+# Base
+base_url = "https://oig.hhs.gov/fraud/enforcement/"
+total_pages = 482 
+all_actions = []
+
+# Function to fetch and parse a single page
+def fetch_page(page):
+    url = f"{base_url}?page={page}"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, "html.parser")
+    actions = []
+    action_items = soup.find_all("li", class_="usa-card card--list pep-card--minimal mobile:grid-col-12")
+
+    # Extract information from each enforcement action item
+    for item in action_items:
+        title_tag = item.find("h2", class_="usa-card__heading").find("a")
+        title = title_tag.get_text(strip=True)
+        link = "https://oig.hhs.gov" + title_tag["href"]
+        date = item.find("span", class_="text-base-dark padding-right-105").get_text(strip=True)
+        category = item.find("li", class_="display-inline-block usa-tag text-no-lowercase text-base-darkest bg-base-lightest margin-right-1").get_text(strip=True)
+        actions.append({
+
+            "Title": title,
+            "Date": date,
+            "Category": category,
+            "Link": link
+         })
+    return actions
+
+# Step 1: Collect enforcement actions from all pages concurrently
+start_time = time.time()
+with ThreadPoolExecutor(max_workers=10) as executor:
+    # Submit tasks for each page
+    future_to_page = {executor.submit(fetch_page, page): page for page in range(1, total_pages + 1)}
+    for future in as_completed(future_to_page):
+        page = future_to_page[future]
+        try:
+            data = future.result()
+            all_actions.extend(data)
+        except Exception as exc:
+            print(f"Page {page} generated an exception: {exc}")
+print(f"Total actions collected: {len(all_actions)}")
+print(f"Time taken to scrape pages concurrently: {time.time() - start_time} seconds")
+
+# Step 2: Create a DataFrame and save to CSV to avoid re-running this part
+df = pd.DataFrame(all_actions)
+df.to_csv("enforcement_actions.csv", index=False)
+print("Data saved to enforcement_actions.csv")
+
+```
+```{python}
+# Load the CSV file containing enforcement actions
+df = pd.read_csv("enforcement_actions.csv")
+
+# Define a function to fetch agency information
+def fetch_agency_info(link):
+    try:
+        # Send a request to the link
+        response = requests.get(link, timeout=10)  # Set a timeout for faster failure on unresponsive links
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        # Find the agency name using the specific class
+        agency_tag = soup.find("span", class_="site-title-agency")
+        
+        # Return the agency name or "Not found" if the tag isn't present
+        return agency_tag.get_text(strip=True) if agency_tag else "Not found"
+    except Exception as e:
+        print(f"Error fetching {link}: {e}")
+        return "Error"
+
+# Initialize an empty list to store agency data for each link
+agency_info_list = []
+
+# Use ThreadPoolExecutor to make concurrent requests
+with ThreadPoolExecutor(max_workers=10) as executor:
+    # Map each link to the fetch_agency_info function
+    future_to_link = {executor.submit(fetch_agency_info, link): link for link in df["Link"]}
+    
+    for future in as_completed(future_to_link):
+        link = future_to_link[future]
+        try:
+            agency_info = future.result()
+            agency_info_list.append(agency_info)
+        except Exception as exc:
+            print(f"Link {link} generated an exception: {exc}")
+            agency_info_list.append("Error")
+
+# Add the agency info to the DataFrame
+df["Agency"] = agency_info_list
+
+# Save the updated DataFrame with agency info
+df.to_csv("enforcement_actions_with_agency.csv", index=False)
+
+# Display the first few rows to verify
+print(df.head())
+
+```
+
+* c. Test Partner's Code (PARTNER 1)
+
+```{python}
+
+
+
+```
+
+## Step 3: Plot data based on scraped data
+
+### 1. Plot the number of enforcement actions over time (PARTNER 2)
+
+```{python}
+
+
+```
+
+### 2. Plot the number of enforcement actions categorized: (PARTNER 1)
+
+* based on "Criminal and Civil Actions" vs. "State Enforcement Agencies"
+
+```{python}
+
+```
+
+* based on five topics
+
+```{python}
+
+```
+
+## Step 4: Create maps of enforcement activity
+
+### 1. Map by State (PARTNER 1)
+
+```{python}
+
+```
+
+
+### 2. Map by District (PARTNER 2)
+
+```{python}
+
+```
+
+## Extra Credit
+
+### 1. Merge zip code shapefile with population
+```{python}
+
+```
+
+### 2. Conduct spatial join
+```{python}
+
+```
+
+### 3. Map the action ratio in each district
+```{python}
+
+```
